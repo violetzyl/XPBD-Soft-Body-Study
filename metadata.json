@@ -1,0 +1,6 @@
+{
+  "name": "Octopus Bilayer Jelly — XPBD Soft-Body Study",
+  "description": "Interactive WebGPU and Three.js XPBD tetrahedral soft-body simulation of a two-layer jelly octopus with curvature-integrated curling arms, chromatophore mottle, muscular writhing waves, bait beads, and live physical telemetry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

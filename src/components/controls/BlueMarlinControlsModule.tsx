@@ -123,18 +123,26 @@ export const BlueMarlinControlsModule: React.FC<
           onChangeParams({ ...params, lightUpMode: !lightUpMode })
         }
         aria-pressed={lightUpMode}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
           lightUpMode
-            ? 'bg-sky-950 text-cyan-300 border border-cyan-400/50 shadow-xs'
-            : 'bg-stone-200/75 text-stone-700 hover:text-stone-950'
+            ? 'bg-sky-950 text-cyan-200 border border-cyan-400/60 shadow-xs'
+            : 'bg-stone-200/75 text-stone-700 border border-transparent hover:text-stone-950'
         }`}
       >
         <Sparkles
           className={`w-3.5 h-3.5 ${
-            lightUpMode ? 'text-cyan-300' : 'text-stone-500'
+            lightUpMode ? 'text-cyan-300 animate-pulse' : 'text-stone-500'
           }`}
         />
         <span>Light-Up Stripes</span>
+        <span
+          className={`ml-0.5 w-1.5 h-1.5 rounded-full ${
+            lightUpMode
+              ? 'bg-cyan-300 shadow-[0_0_6px_rgba(34,211,238,0.95)]'
+              : 'bg-stone-400/70'
+          }`}
+          aria-hidden="true"
+        />
       </button>
     </div>
   );

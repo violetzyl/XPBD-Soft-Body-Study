@@ -75,8 +75,14 @@ export interface BlueMarlinSimState {
   billSlashTimer: number;
   /** Active timer for vigorous tail swish burst */
   tailSwishBurstTimer: number;
+  /** Active timer for rostral-to-caudal neural stripe ignition cascade */
+  stripePulseTimer: number;
+  /** Continuous phase for rostral-to-caudal bioluminescent wave propagation across the 15 stripes */
+  stripeWavePhase: number;
   /** Real-time electric-blue lateral stripe luminescence intensity (pulses/flashes during slash or swish) */
   stripeGlowIntensity: number;
+  /** Per-stripe neural excitation intensity across the 15 transverse lateral bars (0..14) */
+  perStripeExcitation: Float32Array;
   beads: MarlinBaitBead[];
   nextBeadId: number;
   lastSlashSeq: number;
@@ -308,7 +314,10 @@ export function createBlueMarlinSimState(numSpine = 40): BlueMarlinSimState {
     lightUpMode: true,
     billSlashTimer: 0,
     tailSwishBurstTimer: 0,
-    stripeGlowIntensity: 0.65,
+    stripePulseTimer: 0.65,
+    stripeWavePhase: 0,
+    stripeGlowIntensity: 0.78,
+    perStripeExcitation: new Float32Array(15).fill(0.75),
     beads: [
       { id: 1, pos: { x: 0.22, y: 0.085, z: 1.75 }, vel: { x: 0, y: 0, z: 0 }, r: 0.085 },
       { id: 2, pos: { x: -0.24, y: 0.085, z: 1.62 }, vel: { x: 0, y: 0, z: 0 }, r: 0.085 },
@@ -322,13 +331,24 @@ export function createBlueMarlinSimState(numSpine = 40): BlueMarlinSimState {
 }
 
 /**
+ * Triggers a rostral-to-caudal neural bioluminescent ignition wave across all 15 lateral stripes.
+ */
+export function triggerMarlinStripePulse(state: BlueMarlinSimState): void {
+  state.stripePulseTimer = 0.95;
+  if (state.lightUpMode) {
+    state.stripeGlowIntensity = Math.max(state.stripeGlowIntensity, 2.15);
+  }
+}
+
+/**
  * Triggers a rapid side-to-side predatory slashing motion of the bill through the cluster of bait beads,
  * spawning a bait school ahead of the bill if fewer than 3 beads are near the rostrum.
  */
 export function triggerMarlinBillSlash(state: BlueMarlinSimState): void {
   state.billSlashTimer = 1.25;
+  state.stripePulseTimer = Math.max(state.stripePulseTimer, 1.15);
   if (state.lightUpMode) {
-    state.stripeGlowIntensity = 2.35;
+    state.stripeGlowIntensity = 2.45;
   }
 
   const nearBillCount = state.beads.filter(
@@ -359,8 +379,9 @@ export function triggerMarlinBillSlash(state: BlueMarlinSimState): void {
  */
 export function triggerMarlinTailSwish(state: BlueMarlinSimState): void {
   state.tailSwishBurstTimer = 1.05;
+  state.stripePulseTimer = Math.max(state.stripePulseTimer, 0.95);
   if (state.lightUpMode) {
-    state.stripeGlowIntensity = Math.max(state.stripeGlowIntensity, 2.05);
+    state.stripeGlowIntensity = Math.max(state.stripeGlowIntensity, 2.15);
   }
 }
 
@@ -385,6 +406,9 @@ export function stepBlueMarlinSim(
   }
   if (state.tailSwishBurstTimer > 0) {
     state.tailSwishBurstTimer = Math.max(0, state.tailSwishBurstTimer - clampedDt);
+  }
+  if (state.stripePulseTimer > 0) {
+    state.stripePulseTimer = Math.max(0, state.stripePulseTimer - clampedDt);
   }
 
   const isSlashing = state.billSlashTimer > 0;
@@ -698,6 +722,7 @@ export function stepBlueMarlinSim(
   const rostrumIndices = [0, 1, 2, 3, 4, 5, 6, 7];
   const tailFork = state.stations[state.numSpine - 1];
 
+  let baitHitShock = 0;
   for (const bead of state.beads) {
     bead.vel.y -= 14.5 * clampedDt;
 
@@ -714,6 +739,7 @@ export function stepBlueMarlinSim(
         bead.vel.x += (nx * push + billSt.vel.x * 0.72) * clampedDt * 8.0;
         bead.vel.y = Math.max(bead.vel.y, isSlashing ? 2.5 : 0.85);
         bead.vel.z += (nz * push + 1.5) * clampedDt * 6.0;
+        baitHitShock = Math.max(baitHitShock, isSlashing ? 0.85 : 0.45);
       }
     }
 
@@ -723,6 +749,7 @@ export function stepBlueMarlinSim(
     if (tailDist < 0.42) {
       bead.vel.x += tailFork.vel.x * 0.52;
       bead.vel.y = Math.max(bead.vel.y, 1.25);
+      baitHitShock = Math.max(baitHitShock, 0.55);
     }
 
     bead.pos.x += bead.vel.x * clampedDt;
@@ -749,27 +776,80 @@ export function stepBlueMarlinSim(
     }
   }
 
-  // 7. Electric-Blue Lateral Stripe Luminescence ("Light-Up" mode pulses/flashes on each slash or swish)
+  // 7. Electric-Blue Lateral Stripe Luminescence & Rostral-to-Caudal Iridophore Excitation Wave
+  const dragDispMag =
+    hasActiveDrag && dragConstraint
+      ? Math.hypot(
+          dragConstraint.deltaX,
+          dragConstraint.deltaY,
+          dragConstraint.deltaZ
+        )
+      : 0;
+  const pulseEnv =
+    state.stripePulseTimer > 0
+      ? Math.sin((state.stripePulseTimer / 0.95) * Math.PI)
+      : 0;
+
+  // Advance rostral-to-caudal bioluminescent wave phase (accelerates during slash, swish burst, or drag)
+  const waveSpeed =
+    4.8 +
+    3.6 * Math.min(1.5, effectiveSwish) +
+    (isSlashing ? 11.5 : 0) +
+    (isBursting ? 8.5 : 0) +
+    (hasActiveDrag ? 4.5 + dragDispMag * 3.5 : 0) +
+    pulseEnv * 7.5;
+  state.stripeWavePhase += waveSpeed * clampedDt;
+
   const swishPulse =
-    Math.abs(Math.sin(state.swimPhase)) * 0.55 * Math.min(1.5, effectiveSwish);
+    (0.32 + 0.48 * Math.abs(Math.sin(state.swimPhase))) *
+    Math.min(1.5, effectiveSwish);
   const slashFlash = isSlashing
-    ? (0.95 + 0.95 * Math.abs(Math.sin(slashPhase))) * slashEnv
+    ? (1.05 + 1.05 * Math.abs(Math.sin(slashPhase))) * slashEnv
     : 0;
   const burstFlash = isBursting
-    ? (0.85 + 0.78 * Math.abs(Math.sin(state.swimPhase * 1.5))) * burstEnv
+    ? (0.92 + 0.85 * Math.abs(Math.sin(state.swimPhase * 1.5))) * burstEnv
     : 0;
-  const dragFlash = hasActiveDrag ? 0.42 : 0;
+  const dragFlash = hasActiveDrag
+    ? Math.min(1.15, 0.45 + dragDispMag * 0.68)
+    : 0;
 
   const targetGlow = state.lightUpMode
     ? Math.min(
-        2.6,
-        0.52 + swishPulse + slashFlash * 1.5 + burstFlash * 1.2 + dragFlash
+        2.75,
+        0.64 +
+          swishPulse +
+          slashFlash * 1.5 +
+          burstFlash * 1.25 +
+          dragFlash +
+          pulseEnv * 0.85 +
+          baitHitShock
       )
     : 0.0;
 
   state.stripeGlowIntensity +=
     (targetGlow - state.stripeGlowIntensity) *
-    (1 - Math.exp(-14.0 * clampedDt));
+    (1 - Math.exp(-15.0 * clampedDt));
+
+  // Update per-stripe excitation across all 15 transverse lateral bars (u = 0.305..0.835)
+  const numBars = state.perStripeExcitation.length;
+  for (let s = 0; s < numBars; s++) {
+    const tBar = s / (numBars - 1);
+    const uBar = 0.305 + Math.pow(tBar, 0.96) * 0.525;
+    const travelWave =
+      0.55 + 0.45 * Math.sin(state.stripeWavePhase - tBar * Math.PI * 3.2);
+    const grabProx = hasActiveDrag
+      ? Math.exp(-Math.pow((uBar - uGrab) / 0.16, 2)) * (0.65 + dragDispMag * 0.85)
+      : 0;
+    const barTarget = state.lightUpMode
+      ? Math.min(
+          2.8,
+          state.stripeGlowIntensity * (0.72 + 0.56 * travelWave) + grabProx
+        )
+      : 0.0;
+    state.perStripeExcitation[s] +=
+      (barTarget - state.perStripeExcitation[s]) *
+      (1 - Math.exp(-18.0 * clampedDt));
+  }
 }
 
 /**

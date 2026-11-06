@@ -516,9 +516,9 @@ export function createMarlinPigmentAndStripeTextures(
       const vDorsal = flank === 0 ? 0.055 : 0.945;
       const vVentral = flank === 0 ? 0.415 : 0.585;
 
-      // Soft underlying vertical bar halo connecting the dashes & spots into a recognizable marlin stripe
+      // Subtle dark pelagic chromatophore bar shadow on resting pigmentMap (when Light-Up is OFF)
       pCtx.save();
-      pCtx.strokeStyle = `${colourway.mottleSecondaryHex}48`;
+      pCtx.strokeStyle = `${colourway.mottlePrimaryHex}55`;
       pCtx.lineWidth = 7.5 * taperScale;
       pCtx.lineCap = 'round';
       pCtx.beginPath();
@@ -532,9 +532,10 @@ export function createMarlinPigmentAndStripeTextures(
       pCtx.stroke();
       pCtx.restore();
 
+      // Subsurface electric-blue bioluminescent bar halo on stripeEmissiveMap (active when Light-Up is ON)
       eCtx.save();
-      eCtx.strokeStyle = 'rgba(2, 132, 199, 0.32)';
-      eCtx.lineWidth = 8.5 * taperScale;
+      eCtx.strokeStyle = 'rgba(0, 195, 255, 0.58)';
+      eCtx.lineWidth = 14.0 * taperScale;
       eCtx.lineCap = 'round';
       eCtx.beginPath();
       eCtx.moveTo(xBase - 2, vDorsal * size);
@@ -544,6 +545,10 @@ export function createMarlinPigmentAndStripeTextures(
         xBase - 1,
         vVentral * size
       );
+      eCtx.stroke();
+
+      eCtx.strokeStyle = 'rgba(125, 249, 255, 0.75)';
+      eCtx.lineWidth = 5.5 * taperScale;
       eCtx.stroke();
       eCtx.restore();
 
@@ -566,23 +571,23 @@ export function createMarlinPigmentAndStripeTextures(
 
         // Dorsal 65% features elongated vertical dashes; ventral 35% transitions into ovoid spots
         const isDash = frac < 0.65 ? k % 3 !== 2 : k % 2 === 0;
-        const rx = (2.1 + rand() * 1.1) * taperScale;
+        const rx = (2.2 + rand() * 1.15) * taperScale;
         const ry =
-          (isDash ? 9.5 + rand() * 4.5 : 3.2 + rand() * 1.8) *
+          (isDash ? 9.8 + rand() * 4.5 : 3.4 + rand() * 1.8) *
           taperScale *
           (0.72 + 0.38 * envAlpha);
         const tilt =
           (flank === 0 ? 1 : -1) * (0.10 * Math.cos(frac * Math.PI) + (rand() - 0.5) * 0.08);
 
-        // Draw primary organic chromatophore dash/spot on pigmentMap
+        // Draw resting dark pelagic melanophore/chromatophore dash/spot on pigmentMap
         pCtx.save();
         pCtx.translate(cx, cy);
         pCtx.rotate(tilt);
 
         const spotGrad = pCtx.createRadialGradient(0, 0, rx * 0.1, 0, 0, Math.max(rx, ry) * 1.18);
-        spotGrad.addColorStop(0, colourway.mottleSpotHex);
-        spotGrad.addColorStop(0.45, colourway.mottleSecondaryHex);
-        spotGrad.addColorStop(0.82, `${colourway.mottlePrimaryHex}aa`);
+        spotGrad.addColorStop(0, colourway.mottlePrimaryHex);
+        spotGrad.addColorStop(0.55, colourway.outerDeepHex);
+        spotGrad.addColorStop(0.85, `${colourway.mottlePrimaryHex}88`);
         spotGrad.addColorStop(1, 'transparent');
         pCtx.fillStyle = spotGrad;
         pCtx.beginPath();
@@ -590,21 +595,44 @@ export function createMarlinPigmentAndStripeTextures(
         pCtx.fill();
         pCtx.restore();
 
-        // Draw electric-blue bioluminescent core on stripeEmissiveMap for "Light-Up" mode
+        // Draw electric-blue bioluminescent iridophore core & outer cyan corona on stripeEmissiveMap
         eCtx.save();
         eCtx.translate(cx, cy);
         eCtx.rotate(tilt);
-        const emiGrad = eCtx.createRadialGradient(0, 0, rx * 0.08, 0, 0, Math.max(rx, ry) * 1.28);
-        emiGrad.addColorStop(0, '#bae6fd');
-        emiGrad.addColorStop(0.36, '#00e5ff');
-        emiGrad.addColorStop(0.75, '#0284c7');
+        const emiGrad = eCtx.createRadialGradient(0, 0, rx * 0.06, 0, 0, Math.max(rx, ry) * 1.52);
+        emiGrad.addColorStop(0, '#ffffff');
+        emiGrad.addColorStop(0.32, '#7df9ff');
+        emiGrad.addColorStop(0.62, '#00e5ff');
+        emiGrad.addColorStop(0.86, '#0284c7');
         emiGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         eCtx.fillStyle = emiGrad;
         eCtx.beginPath();
-        eCtx.ellipse(0, 0, rx * 1.22, ry * 1.18, 0, 0, Math.PI * 2);
+        eCtx.ellipse(0, 0, rx * 1.50, ry * 1.35, 0, 0, Math.PI * 2);
         eCtx.fill();
         eCtx.restore();
       }
+    }
+  }
+
+  // Subtle bioluminescent neuromast pores along the lateral line (u = 0.30..0.84, v = 0.25 & 0.75)
+  for (const vLat of [0.25, 0.75]) {
+    for (let p = 0; p < 44; p++) {
+      const tP = p / 43;
+      const uP = 0.30 + tP * 0.54;
+      const archV =
+        uP < 0.44
+          ? (vLat < 0.5 ? -1 : 1) * 0.032 * Math.sin(((uP - 0.30) / 0.14) * Math.PI)
+          : 0;
+      const px = uP * size;
+      const py = (vLat + archV) * size;
+      const poreGrad = eCtx.createRadialGradient(px, py, 0.4, px, py, 4.2);
+      poreGrad.addColorStop(0, 'rgba(186, 230, 253, 0.85)');
+      poreGrad.addColorStop(0.5, 'rgba(0, 229, 255, 0.45)');
+      poreGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      eCtx.fillStyle = poreGrad;
+      eCtx.beginPath();
+      eCtx.arc(px, py, 4.2, 0, Math.PI * 2);
+      eCtx.fill();
     }
   }
 
@@ -630,12 +658,12 @@ export function createMarlinPigmentAndStripeTextures(
     pCtx.lineTo(size, yRay);
     pCtx.stroke();
 
-    if (r % 3 === 0) {
-      eCtx.strokeStyle = 'rgba(0, 229, 255, 0.14)';
-      eCtx.lineWidth = 1.1;
+    if (r % 2 === 0) {
+      eCtx.strokeStyle = r % 4 === 0 ? 'rgba(125, 249, 255, 0.34)' : 'rgba(0, 229, 255, 0.20)';
+      eCtx.lineWidth = r % 4 === 0 ? 1.5 : 1.1;
       eCtx.beginPath();
-      eCtx.moveTo(finBandX + 4, yRay);
-      eCtx.lineTo(size - 6, yRay);
+      eCtx.moveTo(finBandX + 2, yRay);
+      eCtx.lineTo(size - 4, yRay);
       eCtx.stroke();
     }
   }

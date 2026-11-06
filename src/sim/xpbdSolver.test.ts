@@ -546,10 +546,11 @@ test('Blue Marlin XPBD regional drag produces C2 smooth non-kinked bending while
     'Expected Swish Burst to produce strong positive effective swish even when slider is at 0%'
   );
 
-  // 3. Verify Light-Up Stripes toggle OFF zeroes stripe glow, and toggle ON illuminates stripes
+  // 3. Verify Light-Up Stripes toggle OFF zeroes stripe glow & per-stripe excitation, and toggle ON triggers a traveling wave across the 15 bars
   zeroSliderSim.lightUpMode = false;
   zeroSliderSim.billSlashTimer = 0;
   zeroSliderSim.tailSwishBurstTimer = 0;
+  zeroSliderSim.stripePulseTimer = 0;
   for (let i = 0; i < 45; i++) {
     stepBlueMarlinSim(zeroSliderSim, 1 / 60);
   }
@@ -557,6 +558,25 @@ test('Blue Marlin XPBD regional drag produces C2 smooth non-kinked bending while
     computeBlueMarlinTelemetry(zeroSliderSim).stripeGlowPct,
     0,
     'Expected Stripe Glow to decay to 0% when Light-Up Stripes is toggled OFF'
+  );
+  assert.ok(
+    zeroSliderSim.perStripeExcitation.every((v) => v < 0.05),
+    'Expected all 15 lateral bars to decay near zero when Light-Up Stripes is OFF'
+  );
+
+  zeroSliderSim.lightUpMode = true;
+  const phaseBefore = zeroSliderSim.stripeWavePhase;
+  for (let i = 0; i < 12; i++) {
+    stepBlueMarlinSim(zeroSliderSim, 1 / 60);
+  }
+  assert.ok(
+    zeroSliderSim.stripeWavePhase > phaseBefore + 0.5,
+    'Expected rostral-to-caudal stripeWavePhase to advance when Light-Up Stripes is active'
+  );
+  assert.notEqual(
+    zeroSliderSim.perStripeExcitation[0],
+    zeroSliderSim.perStripeExcitation[7],
+    'Expected traveling wave to produce spatial phase variation across the 15 lateral stripes'
   );
 
   // 4. Verify shared dorsal span & sweep helpers

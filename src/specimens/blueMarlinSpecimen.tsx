@@ -7,6 +7,7 @@ import {
   createBlueMarlinSimState,
   stepBlueMarlinSim,
   triggerMarlinBillSlash,
+  triggerMarlinStripePulse,
   triggerMarlinTailSwish,
 } from '../sim/blueMarlinSim';
 import {
@@ -140,12 +141,135 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
     const group = new THREE.Group();
     scene.add(group);
 
-    // 1. Dedicated Blue Marlin Bilayer & Fin Hydrofoil Materials:
+    // 1. Dedicated Blue Marlin Bilayer & Fin Hydrofoil Materials with Traveling-Wave Bioluminescent Shader:
     let activeColourway: ColourwayId = 'cobalt';
     const initialPal = COLOURWAYS[activeColourway];
     const { pigmentMap, stripeEmissiveMap } =
       createMarlinPigmentAndStripeTextures(initialPal, 4);
     const marlinNormalTex = createMarlinNormalTexture(4);
+
+    const marlinStripeUniforms = {
+      uStripeWavePhase: { value: 0.0 },
+      uStripeGlow: { value: simState.stripeGlowIntensity },
+      uDragExcite: { value: 0.0 },
+      uGrabAxialU: { value: 0.35 },
+      uStripeEmissiveMap: { value: stripeEmissiveMap },
+    };
+
+    const attachMarlinStripeShader = (
+      mat: THREE.MeshPhysicalMaterial,
+      cacheKey: string
+    ) => {
+      mat.customProgramCacheKey = () => cacheKey;
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uSssColor = sssUniforms.uSssColor;
+        shader.uniforms.uRimLightPos = sssUniforms.uRimLightPos;
+        shader.uniforms.uRimLightColor = sssUniforms.uRimLightColor;
+        shader.uniforms.uKeyLightPos = sssUniforms.uKeyLightPos;
+        shader.uniforms.uSssStrength = sssUniforms.uSssStrength;
+        shader.uniforms.uSssDistortion = sssUniforms.uSssDistortion;
+        shader.uniforms.uSssPower = sssUniforms.uSssPower;
+        shader.uniforms.uCausticShimmer = sssUniforms.uCausticShimmer;
+        shader.uniforms.uTime = sssUniforms.uTime;
+        shader.uniforms.uGrabWorldPos = sssUniforms.uGrabWorldPos;
+        shader.uniforms.uStressGlow = sssUniforms.uStressGlow;
+        shader.uniforms.uStripeWavePhase = marlinStripeUniforms.uStripeWavePhase;
+        shader.uniforms.uStripeGlow = marlinStripeUniforms.uStripeGlow;
+        shader.uniforms.uDragExcite = marlinStripeUniforms.uDragExcite;
+        shader.uniforms.uGrabAxialU = marlinStripeUniforms.uGrabAxialU;
+        shader.uniforms.uStripeEmissiveMap = marlinStripeUniforms.uStripeEmissiveMap;
+
+        shader.vertexShader =
+          `varying vec3 vJellyWorldPos;\nvarying vec2 vMarlinUV;\n` +
+          shader.vertexShader.replace(
+            '#include <worldpos_vertex>',
+            `#include <worldpos_vertex>
+             vJellyWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+             vMarlinUV = uv;`
+          );
+
+        shader.fragmentShader =
+          `varying vec3 vJellyWorldPos;
+           varying vec2 vMarlinUV;
+           uniform vec3 uSssColor;
+           uniform vec3 uRimLightPos;
+           uniform vec3 uRimLightColor;
+           uniform vec3 uKeyLightPos;
+           uniform float uSssStrength;
+           uniform float uSssDistortion;
+           uniform float uSssPower;
+           uniform float uCausticShimmer;
+           uniform float uTime;
+           uniform vec3 uGrabWorldPos;
+           uniform float uStressGlow;
+           uniform float uStripeWavePhase;
+           uniform float uStripeGlow;
+           uniform float uDragExcite;
+           uniform float uGrabAxialU;
+           uniform sampler2D uStripeEmissiveMap;\n` +
+          shader.fragmentShader
+            .replace(
+              '#include <dithering_fragment>',
+              `vec3 viewVec = normalize(cameraPosition - vJellyWorldPos);
+               vec3 rimDir = normalize(uRimLightPos - vJellyWorldPos);
+               vec3 keyDir = normalize(uKeyLightPos - vJellyWorldPos);
+               vec3 worldN = normalize(( vec4(normal, 0.0) * viewMatrix ).xyz);
+
+               vec3 transHalfRim = normalize(rimDir + worldN * uSssDistortion);
+               float backScatterRim = pow(clamp(dot(viewVec, -transHalfRim), 0.0, 1.0), uSssPower);
+               vec3 transHalfKey = normalize(keyDir + worldN * uSssDistortion);
+               float backScatterKey = pow(clamp(dot(viewVec, -transHalfKey), 0.0, 1.0), uSssPower + 0.8);
+
+               float fresnelRim = pow(1.0 - clamp(abs(dot(viewVec, worldN)), 0.0, 1.0), 2.5);
+               vec3 sssContribution = uSssColor * (backScatterRim * 0.85 + backScatterKey * 0.45 + fresnelRim * 0.55) * uSssStrength;
+               sssContribution += uRimLightColor * (fresnelRim * backScatterRim * 0.45 * uSssStrength);
+
+               if (uStripeGlow > 0.01) {
+                 vec3 rawStripeEmi = texture2D(uStripeEmissiveMap, vMarlinUV).rgb;
+                 float isFinBand = step(0.87, vMarlinUV.x);
+                 float uBody = clamp(vMarlinUV.x / 0.86, 0.0, 1.0);
+                 float tStripeZone = clamp((uBody - 0.295) / 0.545, 0.0, 1.0);
+                 float rostralCaudalWave = 0.38 + 0.62 * sin(uStripeWavePhase - tStripeZone * 11.4);
+                 float dvScintillation = 0.68 + 0.32 * cos(vMarlinUV.y * 46.0 - uStripeWavePhase * 1.9);
+                 float grabProx = exp(-pow((uBody - uGrabAxialU) / 0.16, 2.0)) * uDragExcite;
+                 float touchRipple = grabProx * (0.85 + 0.50 * sin(abs(uBody - uGrabAxialU) * 32.0 - uStripeWavePhase * 2.8));
+
+                 float finSpan = clamp((vMarlinUV.x - 0.885) / 0.10, 0.0, 1.0);
+                 float finPulse = 0.52 + 0.48 * sin(uStripeWavePhase * 1.25 - finSpan * 6.5 - vMarlinUV.y * 8.0);
+
+                 float waveMod = mix(
+                   (0.65 + 0.90 * rostralCaudalWave * dvScintillation) + touchRipple,
+                   0.72 + 0.72 * finPulse,
+                   isFinBand
+                 );
+                 float rawLen = length(rawStripeEmi);
+                 float corePeak = smoothstep(0.42, 1.15, rawLen);
+                 vec3 bioStripeRadiance = rawStripeEmi * uStripeGlow * waveMod * 1.28;
+                 bioStripeRadiance += vec3(0.65, 0.98, 1.0) * corePeak * uStripeGlow * 0.52 * (rostralCaudalWave + touchRipple * 0.65);
+
+                 float stripeMask = smoothstep(0.05, 0.75, rawLen);
+                 sssContribution += bioStripeRadiance;
+                 sssContribution += vec3(0.0, 0.86, 1.0) * fresnelRim * min(1.5, uStripeGlow * 0.30) * (0.30 + 0.70 * stripeMask);
+               }
+
+               if (uStressGlow > 0.01) {
+                 float distToGrab = length(vJellyWorldPos - uGrabWorldPos);
+                 float localStretch = exp(-distToGrab * distToGrab * 3.2) * uStressGlow;
+                 sssContribution += mix(uSssColor, vec3(0.45, 0.95, 1.0), 0.55) * localStretch * (0.45 + 0.55 * fresnelRim);
+               }
+
+               if (uCausticShimmer > 0.01) {
+                 float cWave1 = sin(vJellyWorldPos.x * 9.5 + uTime * 2.4) * cos(vJellyWorldPos.z * 9.5 - uTime * 1.9);
+                 float cWave2 = sin((vJellyWorldPos.x + vJellyWorldPos.z) * 7.2 - uTime * 2.8);
+                 float caustic = pow(max(0.0, 0.5 + 0.5 * (cWave1 * 0.6 + cWave2 * 0.4)), 4.0);
+                 sssContribution += uRimLightColor * caustic * 0.28 * uCausticShimmer * max(0.2, worldN.y + 0.5);
+               }
+
+               gl_FragColor.rgb += sssContribution;
+               #include <dithering_fragment>`
+            );
+      };
+    };
 
     const marlinOuterMat = outerJellyMat.clone();
     marlinOuterMat.map = pigmentMap;
@@ -158,9 +282,10 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
     marlinOuterMat.attenuationDistance = 0.82;
     marlinOuterMat.emissive = new THREE.Color('#00e5ff');
     marlinOuterMat.emissiveMap = stripeEmissiveMap;
-    marlinOuterMat.emissiveIntensity = 0.75;
+    marlinOuterMat.emissiveIntensity = 0.85;
     marlinOuterMat.sheen = 0.76;
     marlinOuterMat.sheenColor = new THREE.Color('#38bdf8');
+    attachMarlinStripeShader(marlinOuterMat, 'marlin-outer-bio-v3');
     marlinOuterMat.needsUpdate = true;
 
     // Dedicated Fin Hydrofoil Material (single-layer watertight fins with crisp lepidotrichia fin rays & zero inner-core z-fighting)
@@ -172,13 +297,19 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
     marlinFinMat.roughness = 0.18;
     marlinFinMat.iridescence = 0.68;
     marlinFinMat.iridescenceIOR = 1.38;
+    attachMarlinStripeShader(marlinFinMat, 'marlin-fin-bio-v3');
     marlinFinMat.needsUpdate = true;
+
+    // Dynamic internal bioluminescent PointLight that casts electric-blue light onto bait beads and tabletop slab in Light-Up mode
+    const stripeBioLight = new THREE.PointLight('#00e5ff', 0.85, 3.4, 1.5);
+    stripeBioLight.position.set(0, 0.55, 0.18);
+    group.add(stripeBioLight);
 
     // Inner Milky-Silver Underbelly with Angle-Dependent Sheen (Iridescence + Grazing Cyan-Silver Sheen)
     const marlinBellyMat = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(initialPal.milkyVentralHex),
       emissive: new THREE.Color(initialPal.innerCoreHex),
-      emissiveIntensity: 0.20,
+      emissiveIntensity: 0.22,
       roughness: 0.16,
       metalness: 0.18,
       clearcoat: 1.0,
@@ -530,9 +661,31 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
       const dorsalFoldScaleXZ = 1.0 / Math.sqrt(dorsalFoldScaleY);
       const napeVolumeCompensation = 1.0 + (1.0 - dorsalFoldScaleY) * 0.14;
 
-      // Update Electric-Blue Lateral Stripe Luminescence intensity
-      marlinOuterMat.emissiveIntensity = simState.stripeGlowIntensity;
-      marlinFinMat.emissiveIntensity = simState.stripeGlowIntensity * 0.65;
+      // Update Electric-Blue Lateral Stripe Luminescence intensity, traveling wave uniforms & internal bioluminescent light
+      marlinOuterMat.emissiveIntensity = simState.stripeGlowIntensity * 1.12;
+      marlinFinMat.emissiveIntensity = simState.stripeGlowIntensity * 0.75;
+      marlinBellyMat.emissiveIntensity =
+        0.16 + Math.min(0.32, simState.stripeGlowIntensity * 0.14);
+
+      marlinStripeUniforms.uStripeWavePhase.value = simState.stripeWavePhase;
+      marlinStripeUniforms.uStripeGlow.value = simState.stripeGlowIntensity;
+      if (grabPart !== 'none' && grabStationIdx >= 0) {
+        marlinStripeUniforms.uGrabAxialU.value =
+          simState.stations[grabStationIdx].u;
+        const dragMag = grabTarget.distanceTo(grabInitialHitWorld);
+        marlinStripeUniforms.uDragExcite.value = Math.min(
+          1.4,
+          0.55 + dragMag * 0.85
+        );
+      } else {
+        marlinStripeUniforms.uDragExcite.value *= 0.88;
+      }
+
+      const midSt = stations[16];
+      stripeBioLight.position.set(midSt.pos.x, midSt.pos.y + 0.08, midSt.pos.z);
+      stripeBioLight.intensity = simState.lightUpMode
+        ? Math.min(1.65, simState.stripeGlowIntensity * 0.62)
+        : 0.0;
 
       // 1. Update SDF-Skinned Dual-Layer Trunk, Long Rounded Bill & Integrated Dual Caudal Keels
       for (let s = 0; s < numSpine; s++) {
@@ -968,9 +1121,26 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
       tetLines,
 
       applyParams(next: BlueMarlinSpecificParams) {
+        const wasLit = simState.lightUpMode;
         simState.tailSwishIntensity = next.tailSwishIntensity;
         simState.dorsalRaised = next.dorsalRaised;
         simState.lightUpMode = next.lightUpMode;
+
+        if (next.lightUpMode && !wasLit) {
+          triggerMarlinStripePulse(simState);
+          marlinOuterMat.emissiveIntensity = simState.stripeGlowIntensity * 1.12;
+          marlinFinMat.emissiveIntensity = simState.stripeGlowIntensity * 0.75;
+          marlinStripeUniforms.uStripeGlow.value = simState.stripeGlowIntensity;
+          stripeBioLight.intensity = Math.min(1.65, simState.stripeGlowIntensity * 0.62);
+        } else if (!next.lightUpMode && wasLit) {
+          simState.stripePulseTimer = 0;
+          simState.stripeGlowIntensity = 0;
+          simState.perStripeExcitation.fill(0);
+          marlinOuterMat.emissiveIntensity = 0;
+          marlinFinMat.emissiveIntensity = 0;
+          marlinStripeUniforms.uStripeGlow.value = 0;
+          stripeBioLight.intensity = 0;
+        }
 
         if (next.slashTriggerSeq && next.slashTriggerSeq !== simState.lastSlashSeq) {
           simState.lastSlashSeq = next.slashTriggerSeq;
@@ -988,6 +1158,7 @@ export const BLUE_MARLIN_SPECIMEN: JellySpecimenDefinition<BlueMarlinSpecificPar
         const pal = COLOURWAYS[id] || COLOURWAYS.cobalt;
         const { pigmentMap: newPigment, stripeEmissiveMap: newEmi } =
           createMarlinPigmentAndStripeTextures(pal, 4);
+        marlinStripeUniforms.uStripeEmissiveMap.value = newEmi;
 
         marlinOuterMat.map = newPigment;
         marlinOuterMat.emissiveMap = newEmi;
